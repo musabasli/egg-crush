@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Egg Crush</title>
+    <!-- Added to the home screen of a phone, the game opens like an app: full screen, with its own icon. -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Egg Crush">
+    <meta name="theme-color" content="#3b2a4d">
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="apple-touch-icon" href="icon-180.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cellipse cx='32' cy='35' rx='20' ry='26' fill='%233fa7f0'/%3E%3Cpath d='M13 36l8-8 8 8 8-8 8 8 7-7' stroke='%23ffd23c' stroke-width='6' fill='none' stroke-linejoin='round'/%3E%3C/svg%3E">
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #3b2a4d;
+        overscroll-behavior: none;
+        touch-action: none;
+        -webkit-user-select: none;
+        user-select: none;
+        -webkit-touch-callout: none;
+        -webkit-tap-highlight-color: transparent;
+      }
+      /* The picture stays clear of a phone's notch, rounded corners and home bar. Where a screen has none
+         of those, the insets are zero and the picture fills the page. */
+      #unity-canvas {
+        position: fixed;
+        left: env(safe-area-inset-left, 0px);
+        top: env(safe-area-inset-top, 0px);
+        width: calc(100% - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
+        height: calc(100% - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+        display: block;
+        background: #3b2a4d;
+        touch-action: none;
+        outline: none;
+      }
+      #loading {
+        position: fixed;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        font-family: "Arial Rounded MT Bold", "Trebuchet MS", Arial, sans-serif;
+        color: #ffc21a;
+        pointer-events: none;
+      }
+      #loading-title {
+        font-size: min(13vw, 86px);
+        font-weight: 900;
+        letter-spacing: 0.02em;
+        text-shadow: 0 0.07em 0 #7a3d00, 0 0.12em 0.2em rgba(0, 0, 0, 0.45);
+      }
+      #loading-bar {
+        width: min(62vw, 420px);
+        height: 16px;
+        margin-top: 26px;
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.16);
+        overflow: hidden;
+      }
+      #loading-fill {
+        width: 0%;
+        height: 100%;
+        border-radius: 10px;
+        background: linear-gradient(90deg, #ff9a2e, #ffe23a);
+        transition: width 0.15s linear;
+      }
+      #loading-note {
+        margin-top: 16px;
+        font-size: 15px;
+        color: #fff1dc;
+        opacity: 0.85;
+        text-align: center;
+        padding: 0 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="unity-canvas" tabindex="-1"></canvas>
+    <div id="loading">
+      <div id="loading-title">EGG CRUSH</div>
+      <div id="loading-bar"><div id="loading-fill"></div></div>
+      <div id="loading-note">Loading...</div>
+    </div>
+    <script>
+      // Silence the game while its tab is hidden. A hidden tab gets no animation frames, so the game
+      // itself cannot react, but its music would keep looping. This remembers every audio context the
+      // game opens and suspends it while the page is not visible.
+      (function () {
+        var contexts = [];
+        ["AudioContext", "webkitAudioContext"].forEach(function (name) {
+          var Original = window[name];
+          if (!Original) { return; }
+          var Wrapped = function (options) {
+            var ctx = options === undefined ? new Original() : new Original(options);
+            contexts.push(ctx);
+            return ctx;
+          };
+          Wrapped.prototype = Original.prototype;
+          window[name] = Wrapped;
+        });
+        document.addEventListener("visibilitychange", function () {
+          contexts.forEach(function (ctx) {
+            try {
+              var change = document.hidden ? ctx.suspend() : ctx.resume();
+              // A context that is closed, or not yet allowed to play, refuses. Nothing to do then.
+              if (change && change.catch) { change.catch(function () {}); }
+            } catch (e) { /* the same refusal, from browsers that throw instead */ }
+          });
+        });
+      })();
+
+      // The game only learns that it is in front again from the browser's "focus" event. Until then it
+      // stays paused, silent and deaf to input. If a browser reports that focus was lost and never
+      // reports that it came back (a phone after a lock screen or an app switch can do this), the game
+      // would be stuck. So remember the last report, and when the player touches the page while it
+      // really has focus, pass the missing "focus" on. In every normal case this does nothing.
+      (function () {
+        var lastReportWasBlur = false;
+        window.addEventListener("blur", function () { lastReportWasBlur = true; }, true);
+        window.addEventListener("focus", function () { lastReportWasBlur = false; }, true);
+        function heal() {
+          if (lastReportWasBlur && !document.hidden && document.hasFocus()) {
+            window.dispatchEvent(new FocusEvent("focus"));
+          }
+        }
+        ["pointerdown", "touchstart", "mousedown", "keydown"].forEach(function (name) {
+          window.addEventListener(name, heal, true);
+        });
+        document.addEventListener("visibilitychange", function () {
+          if (!document.hidden) { setTimeout(heal, 250); }
+        });
+      })();
+    </script>
+    <script src="Build/Web.loader.js"></script>
+    <script>
+      (function () {
+        var canvas = document.querySelector("#unity-canvas");
+        var loading = document.querySelector("#loading");
+        var fill = document.querySelector("#loading-fill");
+        var note = document.querySelector("#loading-note");
+
+        // The right mouse button is a game control, so it must not open the browser menu.
+        canvas.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+        // Keep the page from scrolling or zooming while the game is touched.
+        document.addEventListener("gesturestart", function (e) { e.preventDefault(); });
+        window.addEventListener("keydown", function (e) {
+          if (e.code === "Space" || e.code.indexOf("Arrow") === 0) { e.preventDefault(); }
+        });
+
+        // Phones with very dense screens would render far more pixels than they can afford.
+        var ratio = Math.min(window.devicePixelRatio || 1, /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) ? 2 : 2.5);
+
+        // The game instance stays inside this function on purpose, so it is not a global that anyone can
+        // type into the console. That only stops casual poking: a debugger can still reach it.
+        createUnityInstance(canvas, {
+          arguments: [],
+          dataUrl: "Build/Web.data.unityweb",
+          frameworkUrl: "Build/Web.framework.js.unityweb",
+          codeUrl: "Build/Web.wasm.unityweb",
+          streamingAssetsUrl: "StreamingAssets",
+          companyName: "musabasli",
+          productName: "Egg Crush",
+          productVersion: "1.0.0",
+          devicePixelRatio: ratio
+        }, function (progress) {
+          fill.style.width = Math.round(progress * 100) + "%";
+        }).then(function () {
+          loading.style.display = "none";
+          canvas.focus();
+        }).catch(function (message) {
+          note.textContent = "The game could not start: " + message;
+          note.style.color = "#ff8fb3";
+        });
+      })();
+    </script>
+  </body>
+</html>
